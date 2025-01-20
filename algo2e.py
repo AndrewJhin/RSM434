@@ -7,7 +7,7 @@ s.headers.update({'X-API-key': '149E22H1'})
 
 # Parameters
 MAX_POSITION = 25000
-LOT_SIZE = 500
+LOT_SIZE = 1500
 SECURITIES = ['CNR', 'ALG', 'AC']
 
 def fetch_bid_ask(ticker):
@@ -37,8 +37,32 @@ def manage_inventory():
         return total_position
     return 0
 
+def reduce_positions():
+    """Reduce inventory to stay within limits."""
+    resp = s.get('http://localhost:9999/v1/securities')
+    if resp.ok:
+        data = resp.json()
+        for security in data:
+            ticker = security['ticker']
+            position = security['position']
+            
+            if position > 0:
+                # Sell excess long positions
+                print(f"Reducing long position for {ticker}: {position} shares")
+                best_bid, _ = fetch_bid_ask(ticker)
+                if best_bid:
+                    sell_quantity = min(position, LOT_SIZE)
+                    place_order(ticker, 'SELL', best_bid, sell_quantity)
+            elif position < 0:
+                # Buy to cover short positions
+                print(f"Reducing short position for {ticker}: {position} shares")
+                _, best_ask = fetch_bid_ask(ticker)
+                if best_ask:
+                    buy_quantity = min(abs(position), LOT_SIZE)
+                    place_order(ticker, 'BUY', best_ask, buy_quantity)
+
 def market_making():
-    """Main market-making loop."""
+    """Main market-making loop with position reduction logic."""
     while True:
         for ticker in SECURITIES:
             best_bid, best_ask = fetch_bid_ask(ticker)
@@ -50,8 +74,8 @@ def market_making():
         
         total_position = manage_inventory()
         if total_position > MAX_POSITION:
-            print("Inventory limit exceeded. Adjusting positions...")
-            # Implement position reduction logic here
+            print("Inventory limit exceeded. Reducing positions...")
+            reduce_positions()
         
         time.sleep(1)  # Adjust frequency to avoid overloading the API
 
