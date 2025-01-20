@@ -1,14 +1,37 @@
 import requests
 import time
+import collections
+import numpy as np
 
 # Initialize API session
 s = requests.Session()
 s.headers.update({'X-API-key': '149E22H1'})
 
 # Parameters
-MAX_POSITION = 25000
-LOT_SIZE = 1500
-SECURITIES = ['CNR', 'ALG', 'AC']
+LOT_SIZE = 1000
+MAX_POSITION = 25000 - LOT_SIZE
+SECURITIES = ['CNR', 'RY', 'AC']
+
+# Parameters for dynamic spread adjustment
+VOLATILITY_WINDOW = 10  # Number of ticks to calculate volatility
+HIGH_VOLATILITY_THRESHOLD = 0.05  # Spread threshold for high volatility
+LOW_VOLATILITY_THRESHOLD = 0.02  # Spread threshold for low volatility
+
+# Store recent spreads for volatility calculation
+recent_spreads = collections.deque(maxlen=VOLATILITY_WINDOW)
+
+def calculate_volatility():
+    """Calculate market volatility based on recent spreads."""
+    if len(recent_spreads) < VOLATILITY_WINDOW:
+        return 0  # Insufficient data to calculate volatility
+    return np.std(recent_spreads)
+
+def get_dynamic_spread(volatility):
+    """Determine the dynamic spread threshold based on volatility."""
+    if volatility > HIGH_VOLATILITY_THRESHOLD:
+        return 0.05  # Higher spread for volatile markets
+    else:
+        return 0.02  # Lower spread for stable markets
 
 def fetch_bid_ask(ticker):
     """Fetch best bid and ask prices for a given security."""
@@ -68,7 +91,32 @@ def market_making():
             best_bid, best_ask = fetch_bid_ask(ticker)
             if best_bid and best_ask:
                 spread = best_ask - best_bid
-                if spread > 0.02:  # Minimum profitable spread
+                if spread > 0.03:  # Minimum profitable spread
+                    place_order(ticker, 'BUY', best_bid, LOT_SIZE)
+                    place_order(ticker, 'SELL', best_ask, LOT_SIZE)
+        
+        total_position = manage_inventory()
+        if total_position > MAX_POSITION:
+            print("Inventory limit exceeded. Reducing positions...")
+            reduce_positions()
+        
+        time.sleep(1)  # Adjust frequency to avoid overloading the API
+
+def market_making_with_dynamic_spread():
+    """Main market-making loop with dynamic spread adjustment."""
+    while True:
+        for ticker in SECURITIES:
+            best_bid, best_ask = fetch_bid_ask(ticker)
+            if best_bid and best_ask:
+                spread = best_ask - best_bid
+                recent_spreads.append(spread)  # Track recent spreads
+                
+                # Calculate market volatility and determine the spread threshold
+                volatility = calculate_volatility()
+                min_spread = get_dynamic_spread(volatility)
+                
+                if spread > min_spread:
+                    print(f"Placing orders for {ticker} with spread: {spread:.4f}")
                     place_order(ticker, 'BUY', best_bid, LOT_SIZE)
                     place_order(ticker, 'SELL', best_ask, LOT_SIZE)
         
@@ -80,4 +128,5 @@ def market_making():
         time.sleep(1)  # Adjust frequency to avoid overloading the API
 
 # Run the strategy
-market_making()
+#market_making()
+market_making_with_dynamic_spread()
