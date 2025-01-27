@@ -4,13 +4,13 @@ import numpy as np
 
 # Initialize API session
 s = requests.Session()
-s.headers.update({'X-API-key': 'P0U2IVMW'})  # Replace with your actual API key
+s.headers.update({'X-API-key': 'WTRA0FSK'})  # Replace with your actual API key
 
 # Parameters
-LOT_SIZE = 2500
+LOT_SIZE = 2000
 MAX_POSITION = 25000
 TIME_DELAY = 3
-MIN_SPREAD = 0.025
+MIN_SPREAD = 0.045
 
 SECURITIES = ['CNR', 'RY', 'AC']
 order_tracking = {}  # To track orders and their creation ticks
@@ -72,7 +72,7 @@ def cancel_and_resubmit_orders(current_tick,time_delay):
         unfilled_quantity = order['quantity'] - order['quantity_filled']
 
         if order_tick and current_tick - order_tick > time_delay:
-            print(f"Canceling and resubmitting order {order_id} (age: {current_tick - order_tick} ticks)")
+            #print(f"Canceling and resubmitting order {order_id} (age: {current_tick - order_tick} ticks)")
             s.delete(f'http://localhost:9999/v1/orders/{order_id}')
             order_tracking.pop(order_id, None)
 
@@ -124,6 +124,7 @@ def reduce_positions():
 def market_making(lot_size,time_delay,min_spread):
     """Main market-making loop with canceling and resubmitting logic."""
     while True:
+        beg = time.time()
         current_tick, status = get_tick()
         if status != 'ACTIVE':
             print("Case has ended. Stopping trading...")
@@ -138,7 +139,7 @@ def market_making(lot_size,time_delay,min_spread):
             if best_bid and best_ask:
                 spread = best_ask - best_bid
                 if spread > min_spread:  # Fixed minimum spread
-                    print(f"Placing orders for {ticker} with spread: {spread:.4f}")
+                    #print(f"Placing orders for {ticker} with spread: {spread:.4f}")
 
                     # Place BUY order
                     buy_resp = place_order(ticker, 'BUY', best_bid, lot_size)
@@ -155,13 +156,16 @@ def market_making(lot_size,time_delay,min_spread):
         # Cancel and resubmit old orders
         cancel_and_resubmit_orders(current_tick,time_delay)
 
-        # Manage inventory limits
-        total_position = manage_inventory()
-        if total_position > MAX_POSITION:
-            print("Inventory limit exceeded. Reducing positions...")
-            reduce_positions()
+        end = time.time()
 
-        time.sleep(1)  # Adjust frequency to avoid overloading the API
+        # Manage inventory limits
+        # total_position = manage_inventory()
+        # if total_position > MAX_POSITION:
+        #     print("Inventory limit exceeded. Reducing positions...")
+        #     reduce_positions()
+        dif = end-beg
+        #print(1-dif)
+        time.sleep(1-dif)  # Adjust frequency to avoid overloading the API
 
 if __name__ == "__main__":
     market_making(LOT_SIZE,TIME_DELAY,MIN_SPREAD)
