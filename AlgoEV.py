@@ -48,7 +48,7 @@ def get_news(own,eps,eps_est,prev_size):
     if resp.ok:
         news_query = resp.json()
         if len(news_query) > prev_size:
-            if (news_query) - prev_size >= 2:
+            if len(news_query) - prev_size >= 2:
                 length = 2
             else:
                 length = 1            
