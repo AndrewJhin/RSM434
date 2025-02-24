@@ -5,7 +5,7 @@ import re
 
 # Initialize API session
 s = requests.Session()
-s.headers.update({'X-API-key': '9JNPDJTT'})  # Use your actual API Key
+s.headers.update({'X-API-key': 'VZY2EIRY'})  # Use your actual API Key
 
 # Constants
 TICKERS = ["TP", "AS", "BA"]
@@ -33,7 +33,7 @@ VALUES = {"TP":[None,-99999,100000],"AS":[None,-99999,10000],"BA":[None,-99999,1
 
 THRESHOLD = 1
 
-LIMIT = 33333
+LIMIT = 15000
 
 def get_tick():
     resp = s.get('http://localhost:9999/v1/case')
@@ -82,7 +82,7 @@ def triangulation(min, max, ticker):
             max = VALUES[ticker][2]
     return min, max
 
-def get_news(own,eps,prev_size,tick,count):
+def get_news(own,eps,prev_size,tick,count,limit):
     trade = False
     resp = s.get ('http://localhost:9999/v1/news', params = {'limit': 50}) # default limit is 20
     if resp.ok:
@@ -112,6 +112,7 @@ def get_news(own,eps,prev_size,tick,count):
                     if count >= 3:
                         trade = True
                         count = 0
+                        #reset_postions(limit)
                     print(VALUES)
                     # print("Updated EPS Table")
                     # print(eps)
@@ -126,6 +127,7 @@ def get_news(own,eps,prev_size,tick,count):
                         min, max = triangulation(min, max, ticker)
                         VALUES[ticker] = [mid, min, max]
                     trade = True
+                    #reset_postions(limit)
                     print(VALUES)
                     # print("Updated EPS Table")
                     # print(eps)
@@ -142,12 +144,28 @@ def get_news(own,eps,prev_size,tick,count):
                     # print("Updated Ownership Table")
                     # print(own)
                     trade = True
+                    #reset_postions(limit)
             for tick in TICKERS:
                 bid, ask = get_bid_ask(tick)
                 print(f'{tick} | BID: {bid} | ASK: {ask}')
             return own, eps, len(news_query), trade, count
         else:
             return own, eps, prev_size, trade, count
+
+# def reset_postions(limit):
+#     for ticker in TICKERS:
+#         if get_position(ticker) > 0:
+#             while get_position(ticker) > 0:
+#                 p = s.post('http://localhost:9999/v1/orders', params = {'ticker': ticker, 'type': 'MARKET', 'quantity': min(ORDER_SIZE, get_position(ticker)), 'action': 'SELL'})
+#                 #print(f"RESETING: {get_position(ticker)}")
+#                 sleep(0.2)
+#         if get_position(ticker) < 0:
+#             while abs(get_position(ticker)) > 0:
+#                 get = min(ORDER_SIZE, abs(get_position(ticker)))
+#                 print(f"RESETING: {get}")
+#                 p = s.post('http://localhost:9999/v1/orders', params = {'ticker': ticker, 'type': 'MARKET', 'quantity': int(get), 'action': 'BUY'})
+
+#                 sleep(0.2)
 
 def get_valuation(category, OWNERSHIP, EPS_ESTIMATES, tick):
     if category not in CONSTANTS:
@@ -204,10 +222,12 @@ def trading(trade,threshold,limit):
             bid, ask = get_bid_ask(ticker)
             if VALUES[ticker][0] > ask + threshold:
                 while get_position(ticker) < limit:
-                    s.post('http://localhost:9999/v1/orders', params = {'ticker': ticker, 'type': 'MARKET', 'quantity': min(ORDER_SIZE, limit - get_position(ticker)), 'action': 'BUY'})
-            if VALUES[ticker][0] < bid - threshold:
-                 while get_position(ticker) < limit:
-                    s.post('http://localhost:9999/v1/orders', params = {'ticker': ticker, 'type': 'MARKET', 'quantity': min(ORDER_SIZE, abs(-1 * limit - get_position(ticker))), 'action': 'SELL'})
+                    p = s.post('http://localhost:9999/v1/orders', params = {'ticker': ticker, 'type': 'MARKET', 'quantity': min(ORDER_SIZE, limit - get_position(ticker)), 'action': 'BUY'})
+                    sleep(0.1)
+            elif VALUES[ticker][0] < bid - threshold:
+                while abs(get_position(ticker)) < limit:
+                    p = s.post('http://localhost:9999/v1/orders', params = {'ticker': ticker, 'type': 'MARKET', 'quantity': min(ORDER_SIZE, abs(-1*limit - get_position(ticker))), 'action': 'SELL'})
+                    sleep(0.1)
     else:   
         return 0
 
@@ -216,8 +236,10 @@ if __name__ == "__main__":
     estimate_count = 0
     default_size = 0
     while status == "ACTIVE":
-        OWNERSHIP, EPS, default_size, trade, estimate_count = get_news(OWNERSHIP, EPS,default_size,tick, estimate_count)
+        #reset_postions(LIMIT)
+        OWNERSHIP, EPS, default_size, trade, estimate_count = get_news(OWNERSHIP, EPS,default_size,tick, estimate_count, LIMIT)
         trading(trade, THRESHOLD, LIMIT)
+        #print("LOOPING")
         """
         PUT A MAIN FUNCTION HERE USING THE VALUES FROM NEWS
         
