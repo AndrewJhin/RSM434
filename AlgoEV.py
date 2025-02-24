@@ -5,7 +5,7 @@ import re
 
 # Initialize API session
 s = requests.Session()
-s.headers.update({'X-API-key': 'P0U2IVMW'})  # Use your actual API Key
+s.headers.update({'X-API-key': '9JNPDJTT'})  # Use your actual API Key
 
 # Constants
 TICKERS = ["TP", "AS", "BA"]
@@ -29,7 +29,11 @@ EPS_ERROR = {"TP":[0.02, 0.04, 0.06, 0.08],"AS":[0.04, 0.08, 0.12, 0.16],"BA":[0
 
 QUARTERS = {(0,59):(0,0),(60,119):(0,1),(120,179):(1,2),(180,239):(2,3),(240,300):(3,4)}
 
-VALUES = {"TP":[None,None,None],"AS":[None,None,None],"BA":[None,None,None]}
+VALUES = {"TP":[None,-99999,100000],"AS":[None,-99999,10000],"BA":[None,-99999,10000]}
+
+THRESHOLD = 1
+
+LIMIT = 33333
 
 def get_tick():
     resp = s.get('http://localhost:9999/v1/case')
@@ -67,9 +71,19 @@ def calculate_errors(tick):
     owne = errors[0]
     epse = errors[1]
     return {key: [0] * owne + value if owne == 0 else [0] * owne + value[:-owne] for key, value in EPS_ERROR.items()}, {key: value - epse * 0.05 for key, value in OWNERSHIP_ERROR.items()}
-    
 
-def get_news(own,eps,prev_size,tick):
+def triangulation(min, max, ticker):
+    #print(VALUES[ticker][1], VALUES[ticker][2])
+    # OLD MAX LESS THAN NEW MIN OR OLD MIN GREATER THAN NEW MAX
+    if VALUES[ticker][2] > min or VALUES[ticker][1] < max:
+        if min < VALUES[ticker][1]:
+            min = VALUES[ticker][1]
+        if max > VALUES[ticker][2]:
+            max = VALUES[ticker][2]
+    return min, max
+
+def get_news(own,eps,prev_size,tick,count):
+    trade = False
     resp = s.get ('http://localhost:9999/v1/news', params = {'limit': 50}) # default limit is 20
     if resp.ok:
         news_query = resp.json()
@@ -92,7 +106,12 @@ def get_news(own,eps,prev_size,tick):
                                 eps[ticker][quarter_index + i] = new_value
 
                     mid, min, max = get_valuation(ticker,own,eps,tick)
+                    min, max = triangulation(min, max, ticker)
                     VALUES[ticker] = [mid, min, max]
+                    count += 1
+                    if count >= 3:
+                        trade = True
+                        count = 0
                     print(VALUES)
                     # print("Updated EPS Table")
                     # print(eps)
@@ -104,7 +123,9 @@ def get_news(own,eps,prev_size,tick):
                         eps[news[0]][int(news[1].replace("Q","").replace(":",""))-1] = float(news[-1].replace("$",""))
                     for ticker in TICKERS:
                         mid, min, max = get_valuation(ticker,own,eps,tick)
+                        min, max = triangulation(min, max, ticker)
                         VALUES[ticker] = [mid, min, max]
+                    trade = True
                     print(VALUES)
                     # print("Updated EPS Table")
                     # print(eps)
@@ -115,14 +136,18 @@ def get_news(own,eps,prev_size,tick):
                     own[ticker.group(0)] = float(value.group(0).replace("%",""))
                     for ticker in TICKERS:
                         mid, min, max = get_valuation(ticker,own,eps,tick)
+                        min, max = triangulation(min, max, ticker)
                         VALUES[ticker] = [mid, min, max]
                     print(VALUES)
                     # print("Updated Ownership Table")
                     # print(own)
-                    
-            return own, eps, len(news_query)
+                    trade = True
+            for tick in TICKERS:
+                bid, ask = get_bid_ask(tick)
+                print(f'{tick} | BID: {bid} | ASK: {ask}')
+            return own, eps, len(news_query), trade, count
         else:
-            return own, eps, prev_size
+            return own, eps, prev_size, trade, count
 
 def get_valuation(category, OWNERSHIP, EPS_ESTIMATES, tick):
     if category not in CONSTANTS:
@@ -173,11 +198,26 @@ def get_valuation(category, OWNERSHIP, EPS_ESTIMATES, tick):
 
     return round(mid_val, 2), round(min_val, 2), round(max_val, 2)
 
+def trading(trade,threshold,limit):
+    if trade:
+        for ticker in TICKERS:
+            bid, ask = get_bid_ask(ticker)
+            if VALUES[ticker][0] > ask + threshold:
+                while get_position(ticker) < limit:
+                    s.post('http://localhost:9999/v1/orders', params = {'ticker': ticker, 'type': 'MARKET', 'quantity': min(ORDER_SIZE, limit - get_position(ticker)), 'action': 'BUY'})
+            if VALUES[ticker][0] < bid - threshold:
+                 while get_position(ticker) < limit:
+                    s.post('http://localhost:9999/v1/orders', params = {'ticker': ticker, 'type': 'MARKET', 'quantity': min(ORDER_SIZE, abs(-1 * limit - get_position(ticker))), 'action': 'SELL'})
+    else:   
+        return 0
+
 if __name__ == "__main__":
     tick, status = get_tick()
+    estimate_count = 0
     default_size = 0
     while status == "ACTIVE":
-        OWNERSHIP, EPS, default_size = get_news(OWNERSHIP, EPS,default_size,tick)
+        OWNERSHIP, EPS, default_size, trade, estimate_count = get_news(OWNERSHIP, EPS,default_size,tick, estimate_count)
+        trading(trade, THRESHOLD, LIMIT)
         """
         PUT A MAIN FUNCTION HERE USING THE VALUES FROM NEWS
         
@@ -189,4 +229,3 @@ if __name__ == "__main__":
         tick, status = get_tick()
         
         
-
