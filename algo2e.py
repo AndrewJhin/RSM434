@@ -1,20 +1,25 @@
 import requests
 import time
 import numpy as np
+from time import sleep
 
 # Initialize API session
 s = requests.Session()
-s.headers.update({'X-API-key': 'WTRA0FSK'})  # Replace with your actual API key
+s.headers.update({'X-API-key': 'P0U2IVMW'})  # Replace with your actual API key
 
 # Parameters
-LOT_SIZE = 2000
+LOT_SIZE = 100
 MAX_POSITION = 25000
-TIME_DELAY = 3
-MIN_SPREAD = 0.045
+TIME_DELAY = 2
+MIN_SPREAD = 0.1
+ADJUSTMENT = 0.02
 
 SECURITIES = ['CNR', 'RY', 'AC']
+#SECURITIES = ['CNR','AC']
 order_tracking = {}  # To track orders and their creation ticks
-
+# Define global variables
+PREVIOUS_BID_SIZE = 0
+PREVIOUS_ASK_SIZE = 0
 # Utility Functions
 def get_tick():
     """Fetch the current tick and status of the case."""
@@ -72,14 +77,14 @@ def cancel_and_resubmit_orders(current_tick,time_delay):
         unfilled_quantity = order['quantity'] - order['quantity_filled']
 
         if order_tick and current_tick - order_tick > time_delay:
-            #print(f"Canceling and resubmitting order {order_id} (age: {current_tick - order_tick} ticks)")
+            print(f"Canceling and resubmitting order {order_id} (age: {current_tick - order_tick} ticks)")
             s.delete(f'http://localhost:9999/v1/orders/{order_id}')
             order_tracking.pop(order_id, None)
 
             if unfilled_quantity > 0:
                 # Fetch updated bid/ask prices for resubmitting
                 best_bid, best_ask = fetch_bid_ask(ticker)
-                new_price = best_bid if action == 'BUY' else best_ask
+                new_price = best_bid + ADJUSTMENT if action == 'BUY' else best_ask - ADJUSTMENT
 
                 if new_price:
                     resp = place_order(ticker, action, new_price, unfilled_quantity)
@@ -124,7 +129,6 @@ def reduce_positions():
 def market_making(lot_size,time_delay,min_spread):
     """Main market-making loop with canceling and resubmitting logic."""
     while True:
-        beg = time.time()
         current_tick, status = get_tick()
         if status != 'ACTIVE':
             print("Case has ended. Stopping trading...")
@@ -139,16 +143,16 @@ def market_making(lot_size,time_delay,min_spread):
             if best_bid and best_ask:
                 spread = best_ask - best_bid
                 if spread > min_spread:  # Fixed minimum spread
-                    #print(f"Placing orders for {ticker} with spread: {spread:.4f}")
+                    print(f"Placing orders for {ticker} with spread: {spread:.4f}")
 
                     # Place BUY order
-                    buy_resp = place_order(ticker, 'BUY', best_bid, lot_size)
+                    buy_resp = place_order(ticker, 'BUY', best_bid + ADJUSTMENT, lot_size)
                     if buy_resp and buy_resp.ok:
                         order_id = buy_resp.json()['order_id']
                         order_tracking[order_id] = current_tick
 
                     # Place SELL order
-                    sell_resp = place_order(ticker, 'SELL', best_ask, lot_size)
+                    sell_resp = place_order(ticker, 'SELL', best_ask - ADJUSTMENT, lot_size)
                     if sell_resp and sell_resp.ok:
                         order_id = sell_resp.json()['order_id']
                         order_tracking[order_id] = current_tick
@@ -156,20 +160,61 @@ def market_making(lot_size,time_delay,min_spread):
         # Cancel and resubmit old orders
         cancel_and_resubmit_orders(current_tick,time_delay)
 
-        end = time.time()
-
         # Manage inventory limits
         # total_position = manage_inventory()
         # if total_position > MAX_POSITION:
         #     print("Inventory limit exceeded. Reducing positions...")
         #     reduce_positions()
-        dif = end-beg
-        #print(1-dif)
-        time.sleep(1-dif)  # Adjust frequency to avoid overloading the API
+
+        time.sleep(0.25)  # Adjust frequency to avoid overloading the API
+
+def analysis():
+    for ticker in SECURITIES:
+        resp = s.get('http://localhost:9999/v1/securities/book',params={'ticker':ticker})
+        if resp.ok:
+            book = resp.json()
+            print(f'TICKER: {ticker}')
+            calculate_ofi(book)
+
+
+
+    
+def calculate_ofi(order_book):
+    """Compute Order Flow Imbalance (OFI)."""
+    global PREVIOUS_BID_SIZE, PREVIOUS_ASK_SIZE  # Declare globals
+
+    best_bid = max(bid["price"] for bid in order_book["bids"])
+    best_ask = min(ask["price"] for ask in order_book["asks"])
+    
+    bid_size = sum(bid["quantity"] for bid in order_book["bids"] if bid["price"] == best_bid)
+    ask_size = sum(ask["quantity"] for ask in order_book["asks"] if ask["price"] == best_ask)
+    
+    delta_bid = bid_size - PREVIOUS_BID_SIZE  # Compute change in bid size
+    delta_ask = ask_size - PREVIOUS_ASK_SIZE  # Compute change in ask size
+
+    # Update global variables
+    PREVIOUS_BID_SIZE = bid_size
+    PREVIOUS_ASK_SIZE = ask_size
+    ofi = (delta_bid * best_bid) - (delta_ask * best_ask)
+    print(f'OFI: {ofi}')
+    return ofi
+
+def trade_flow_prediction(trades):
+    """Predict price direction using aggressive trade flow."""
+    buy_trades = sum(1 for t in trades if t["price"] >= t["ask"])
+    sell_trades = sum(1 for t in trades if t["price"] <= t["bid"])
+    
+    bsr = buy_trades / max(sell_trades, 1)  # Avoid division by zero
+    return "Bullish" if bsr > 1 else "Bearish"
 
 if __name__ == "__main__":
     market_making(LOT_SIZE,TIME_DELAY,MIN_SPREAD)
-
+    # tick, status = get_tick()
+    # previous_bid_size, previous_ask_size = 0, 0  # Initialize storage for past data
+    # while status == "ACTIVE":
+    #     analysis()
+    #     sleep(1)
+    #     tick, status = get_tick()
 
 
 # import requests
